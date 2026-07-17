@@ -1,13 +1,14 @@
 // =============================================================================
-// AegisAuth — Phase 1 foundational schema
+// AegisAuth — Prisma schema
 // =============================================================================
-// ID strategy: UUID (postgresql gen_random_uuid via Prisma @default(uuid())).
-// UUIDs are opaque, collision-resistant, and interoperable across services/SDKs.
+// ID strategy: UUID (@default(uuid())).
+// Phase 1: Organization, Application
+// Phase 2: PlatformUser identity, passkeys, sessions, challenges, auth events
 //
-// Cascade: deleting an Organization removes its Applications. Applications are
-// org-scoped configuration entities with no independent security meaning yet.
-// Future security-sensitive models (credentials, sessions, audit) must NOT
-// inherit cascade blindly — design deletion policy per model.
+// PlatformUser ≠ future Application end-users. Keep domains separate.
+// Passkey private keys NEVER reach AegisAuth — only public credential material.
+// Session tokens: store SHA-256 hash only; raw token lives in HttpOnly cookie.
+// Challenges: short-lived, single-use, typed (REGISTRATION | AUTHENTICATION).
 // =============================================================================
 
 generator client {
@@ -20,6 +21,26 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum WebAuthnChallengeType {
+  REGISTRATION
+  AUTHENTICATION
+}
+
+enum AuthenticationEventType {
+  PASSKEY_REGISTRATION_SUCCESS
+  PASSKEY_REGISTRATION_FAILURE
+  PASSKEY_AUTHENTICATION_SUCCESS
+  PASSKEY_AUTHENTICATION_FAILURE
+  SESSION_CREATED
+  SESSION_REVOKED
+}
+
 model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -28,6 +49,7 @@ model Organization {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   applications Application[]
+  members      OrganizationMember[]
 
   @@map("organizations")
 }
@@ -45,4 +67,120 @@ model Application {
   @@unique([organizationId, slug])
   @@index([organizationId])
   @@map("applications")
+}
+
+/// AegisAuth platform/developer account (dashboard identity).
+/// Email is an identifier only — Phase 2 does NOT prove email ownership.
+model PlatformUser {
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String   @unique
+  displayName String   @map("display_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  memberships       OrganizationMember[]
+  passkeys          PasskeyCredential[]
+  sessions          Session[]
+  challenges        WebAuthnChallenge[]
+  authenticationEvents AuthenticationEvent[]
+
+  @@map("platform_users")
+}
+
+model OrganizationMember {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  platformUserId String           @map("platform_user_id") @db.Uuid
+  role           OrganizationRole @default(MEMBER)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  platformUser PlatformUser @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, platformUserId])
+  @@index([platformUserId])
+  @@map("organization_members")
+}
+
+/// Public WebAuthn credential material only — never private keys.
+model PasskeyCredential {
+  id             String    @id @default(uuid()) @db.Uuid
+  platformUserId String    @map("platform_user_id") @db.Uuid
+  /// Base64URL credential ID from the authenticator (unique).
+  credentialId   String    @unique @map("credential_id")
+  /// COSE public key bytes from SimpleWebAuthn verification.
+  publicKey      Bytes     @map("public_key")
+  counter        BigInt    @default(0)
+  transports     String[]  @default([])
+  deviceType     String    @map("device_type")
+  backedUp       Boolean   @map("backed_up")
+  friendlyName   String?   @map("friendly_name")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+
+  platformUser PlatformUser @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+
+  @@index([platformUserId])
+  @@map("passkey_credentials")
+}
+
+/// Short-lived, single-use WebAuthn challenges. Not stored on PlatformUser permanently.
+model WebAuthnChallenge {
+  id             String                @id @default(uuid()) @db.Uuid
+  challenge      String                @unique
+  type           WebAuthnChallengeType
+  platformUserId String?               @map("platform_user_id") @db.Uuid
+  /// Normalized email for registration/login context when user may not exist yet.
+  email          String?
+  /// JSON registration context (displayName, organizationName, provisionalUserId, etc.).
+  context        Json?
+  expiresAt      DateTime              @map("expires_at")
+  usedAt         DateTime?             @map("used_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  platformUser PlatformUser? @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([platformUserId])
+  @@index([email])
+  @@map("webauthn_challenges")
+}
+
+/// Opaque server-side sessions. DB stores token hash only.
+model Session {
+  id             String    @id @default(uuid()) @db.Uuid
+  platformUserId String    @map("platform_user_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash")
+  expiresAt      DateTime  @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  lastUsedAt     DateTime  @default(now()) @map("last_used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  userAgent      String?   @map("user_agent")
+  ipAddress      String?   @map("ip_address")
+
+  platformUser PlatformUser @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+
+  @@index([platformUserId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Basic auth event log — not a tamper-evident audit chain (future phase).
+model AuthenticationEvent {
+  id             String                  @id @default(uuid()) @db.Uuid
+  platformUserId String?                 @map("platform_user_id") @db.Uuid
+  type           AuthenticationEventType
+  success        Boolean
+  ipAddress      String?                 @map("ip_address")
+  userAgent      String?                 @map("user_agent")
+  metadata       Json?
+  createdAt      DateTime                @default(now()) @map("created_at")
+
+  platformUser PlatformUser? @relation(fields: [platformUserId], references: [id], onDelete: SetNull)
+
+  @@index([platformUserId])
+  @@index([createdAt])
+  @@index([type])
+  @@map("authentication_events")
 }

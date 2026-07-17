@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Fail fast on invalid configuration.
- * Secrets stay server-side; WEB_ORIGIN is an allowlist (never "*").
+ * Secrets stay server-side; WEB_ORIGIN / WEBAUTHN_ORIGIN are allowlists (never "*").
  */
 const envSchema = z.object({
   NODE_ENV: z
@@ -17,6 +17,25 @@ const envSchema = z.object({
     }),
   DATABASE_URL: z.string().min(1).optional(),
   DIRECT_URL: z.string().min(1).optional(),
+
+  WEBAUTHN_RP_NAME: z.string().min(1).default("AegisAuth"),
+  /** Effective domain for WebAuthn RP ID (e.g. localhost or aegisauth.example). */
+  WEBAUTHN_RP_ID: z.string().min(1).default("localhost"),
+  /** Expected browser origin for WebAuthn ceremonies (must match the web app). */
+  WEBAUTHN_ORIGIN: z
+    .string()
+    .url()
+    .refine((value) => value !== "*", {
+      message: "WEBAUTHN_ORIGIN must be an explicit origin",
+    }),
+
+  /** Session lifetime in seconds (default 7 days). */
+  SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
+  /** WebAuthn challenge lifetime in seconds (default 5 minutes). */
+  WEBAUTHN_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_TIME_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

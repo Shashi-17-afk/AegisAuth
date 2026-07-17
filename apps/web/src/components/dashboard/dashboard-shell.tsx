@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   AppWindow,
@@ -13,9 +13,11 @@ import {
   Settings,
   Menu,
   X,
+  LogOut,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useAuth } from "@/components/auth/auth-provider";
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -45,13 +47,20 @@ export function DashboardShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+
+  async function handleLogout() {
+    await logout();
+    router.replace("/login");
+  }
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[240px_1fr]">
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-50 w-64 border-r border-[var(--border)] bg-[var(--surface)] transition-transform lg:static lg:w-auto lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-[var(--border)] bg-[var(--surface)] transition-transform lg:static lg:w-auto lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         ].join(" ")}
       >
@@ -68,7 +77,7 @@ export function DashboardShell({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <nav className="space-y-1 p-3" aria-label="Dashboard">
+        <nav className="flex-1 space-y-1 p-3" aria-label="Dashboard">
           {navItems.map((item) => {
             const active = isActive(pathname, item.href);
             const Icon = item.icon;
@@ -91,6 +100,22 @@ export function DashboardShell({
             );
           })}
         </nav>
+        <div className="border-t border-[var(--border)] p-3">
+          {user ? (
+            <div className="mb-2 px-3">
+              <p className="truncate text-sm font-medium">{user.displayName}</p>
+              <p className="truncate text-xs text-[var(--muted)]">{user.email}</p>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--muted)] transition hover:bg-ink-50 hover:text-[var(--foreground)] dark:hover:bg-ink-900/70"
+          >
+            <LogOut className="h-4 w-4" aria-hidden />
+            Log out
+          </button>
+        </div>
       </aside>
 
       {open ? (

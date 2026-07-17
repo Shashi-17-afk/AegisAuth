@@ -7,6 +7,11 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 loadEnv({ path: resolve(rootDir, ".env") });
 loadEnv({ path: resolve(rootDir, ".env.local"), override: true });
 
+/**
+ * Cookie-preserving proxy lives in `src/app/api/[...path]/route.ts`.
+ * Do NOT use next.config rewrites for /api → Fastify: external rewrites can
+ * drop Set-Cookie (forbidden response header under fetch proxy semantics).
+ */
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["@aegisauth/shared"],

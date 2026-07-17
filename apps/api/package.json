@@ -8,13 +8,17 @@
     "build": "tsc -p tsconfig.json",
     "start": "dotenv -e ../../.env -- node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "dotenv -e ../../.env -- vitest run"
   },
   "dependencies": {
     "@aegisauth/database": "workspace:*",
     "@aegisauth/shared": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.1",
     "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.2.2",
+    "@simplewebauthn/server": "^13.3.2",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },
@@ -22,6 +26,7 @@
     "@types/node": "^22.10.2",
     "dotenv-cli": "^8.0.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
   }
 }

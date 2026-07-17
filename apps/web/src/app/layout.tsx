@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono, Fraunces } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/components/auth/auth-provider";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -44,7 +45,9 @@ export default function RootLayout({
         className={`${sans.variable} ${display.variable} ${mono.variable} relative antialiased`}
       >
         <ThemeProvider>
-          <div className="relative z-10">{children}</div>
+          <AuthProvider>
+            <div className="relative z-10">{children}</div>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

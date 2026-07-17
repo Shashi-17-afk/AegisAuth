@@ -13,7 +13,7 @@ export const prisma =
   new PrismaClient({
     log:
       process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
+        ? ["error", "warn"]
         : ["error"],
   });
 
@@ -22,4 +22,17 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export { PrismaClient };
-export type { Organization, Application, Prisma } from "@prisma/client";
+export type {
+  Organization,
+  Application,
+  PlatformUser,
+  OrganizationMember,
+  PasskeyCredential,
+  WebAuthnChallenge,
+  Session,
+  AuthenticationEvent,
+  OrganizationRole,
+  WebAuthnChallengeType,
+  AuthenticationEventType,
+  Prisma,
+} from "@prisma/client";

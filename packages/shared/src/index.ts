@@ -11,3 +11,10 @@ export {
   type Organization,
   type Application,
 } from "./organization.js";
+
+export {
+  platformUserSchema,
+  meResponseSchema,
+  type PlatformUser,
+  type MeResponse,
+} from "./auth.js";

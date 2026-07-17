@@ -11,6 +11,8 @@ import { healthRoutes } from "./routes/health.js";
 import { apiRoutes } from "./routes/api.js";
 import { authRoutes } from "./routes/auth.js";
 import { riskRoutes } from "./routes/risk.js";
+import { applicationRoutes } from "./routes/applications.js";
+import { actionRoutes } from "./routes/actions.js";
 
 export async function buildApp(env: Env) {
   const app = Fastify({
@@ -52,6 +54,8 @@ export async function buildApp(env: Env) {
   await app.register(apiRoutes);
   await app.register(authRoutes(env));
   await app.register(riskRoutes(env));
+  await app.register(applicationRoutes(env));
+  await app.register(actionRoutes(env));
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {

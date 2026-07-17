@@ -41,6 +41,28 @@ const envSchema = z.object({
    */
   RISK_MODE: z.enum(["observe", "enforce"]).default("observe"),
 
+  /**
+   * How long a PENDING action authorization may wait for passkey verification.
+   * Default 5 minutes. Bounds: 60s–3600s.
+   */
+  ACTION_AUTH_PENDING_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3600)
+    .default(300),
+  /**
+   * How long an AUTHORIZED grant may wait before execute.
+   * Default 5 minutes from authorizedAt. Bounds: 60s–3600s.
+   * Separate from pending TTL so verify and execute windows are explicit.
+   */
+  ACTION_AUTH_EXECUTION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3600)
+    .default(300),
+
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_TIME_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });

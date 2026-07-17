@@ -33,6 +33,8 @@ export type {
   AuthenticationEvent,
   RiskAssessment,
   RiskSignal,
+  ActionAuthorization,
+  ActionAuthorizationEvent,
   OrganizationRole,
   WebAuthnChallengeType,
   AuthenticationEventType,
@@ -41,5 +43,9 @@ export type {
   RiskMode,
   RiskSignalType,
   RiskSignalSeverity,
+  ActionType,
+  ActionTargetType,
+  ActionAuthorizationStatus,
+  ActionAuthorizationEventType,
   Prisma,
 } from "@prisma/client";

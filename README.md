@@ -6,9 +6,9 @@ Adaptive Passwordless Authentication & Verifiable Authorization Platform
 
 AegisAuth is a developer-first authentication and authorization platform. It helps applications authenticate users with minimal reliance on passwords and vulnerable communication channels, and extends authentication beyond login into sensitive action authorization.
 
-**Current Phase: Phase 3 — Adaptive & Explainable Risk Engine**
+**Current Phase: Phase 4 — Intent-Bound Action Authorization**
 
-Platform/developer accounts authenticate with WebAuthn passkeys. After a credential is verified, AegisAuth evaluates deterministic, explainable risk signals in **Observe Mode** (assessments are stored and displayed; valid passkey logins are not blocked).
+Authentication answers *who you are*. Risk assessment answers *how risky the context looks*. Phase 4 answers *what exact action you are authorizing* — via a server-stored canonical intent bound to a single-use WebAuthn challenge.
 
 ## Problem
 
@@ -32,7 +32,7 @@ Passwords and weak shared-secret channels remain a primary source of account com
 | Server-side session management | **Implemented (Phase 2)** |
 | Passkey listing / session revocation | **Implemented (Phase 2)** |
 | Adaptive explainable risk evaluation | **Implemented (Phase 3, Observe Mode)** |
-| Sensitive action authorization | Planned |
+| Intent-bound action authorization | **Implemented (Phase 4)** |
 | Multi-party approval policies | Planned |
 | Tamper-evident audit trails | Planned |
 | Secure account recovery | Planned |
@@ -73,31 +73,76 @@ Prisma → Supabase PostgreSQL
 
 **Important:** Supabase is used only as managed PostgreSQL infrastructure. AegisAuth implements its own authentication. Do **not** use Supabase Auth, magic links, OTP, or social login.
 
-### Phase 3 risk flow
+### Phase 4 action authorization flow
 
 ```
-Verified Passkey
-      │
-      ▼
-Risk Context Collector
-      │
-      ▼
-Risk Engine
-      │
-      ├── Signals
-      ├── Score
-      ├── Level
-      └── Reasons
-      │
-      ▼
-Risk Assessment
-      │
-      ▼
-OBSERVE MODE
-      │
-      ▼
-Session Created
+Authenticated Session
+        │
+        ▼
+Sensitive Action Requested
+        │
+        ▼
+Canonical Intent Created
+        │
+        +──► SHA-256 Intent Hash
+        │
+        ▼
+PENDING Authorization
+        │
+        ▼
+Single-Use WebAuthn Challenge
+        │
+        ▼
+User Reviews Exact Intent
+        │
+        ▼
+Passkey Verification
+        │
+        ▼
+AUTHORIZED
+        │
+        ▼
+Execute Stored Intent
+        │
+        ▼
+EXECUTED
 ```
+
+**Precise WebAuthn wording:** Passkey verification authorizes a **server-stored canonical action intent** bound to a single-use WebAuthn challenge. AegisAuth does **not** claim that the authenticator directly signs arbitrary transaction JSON.
+
+## Intent-Bound Action Authorization (Phase 4)
+
+### Three questions
+
+| Layer | Question |
+|---|---|
+| Authentication | Who are you? |
+| Risk | How risky is this context? |
+| Authorization | What exact action are you approving? |
+
+A valid session alone cannot execute protected sensitive actions. Phase 4 demo action: **`DELETE_APPLICATION`**.
+
+### Security properties (enforced server-side)
+
+- Canonical intent with deterministic key sorting + SHA-256 `intentHash`
+- Intent immutable after creation (change = new authorization)
+- Short-lived `PENDING` (`ACTION_AUTH_PENDING_TTL_SECONDS`) and `AUTHORIZED` (`ACTION_AUTH_EXECUTION_TTL_SECONDS`) windows
+- Single-use WebAuthn challenge typed `ACTION_AUTHORIZATION`
+- Execute accepts **only** `authorizationId` — never client-resubmitted targets
+- Replay of execute → `409 ALREADY_EXECUTED`
+- Tampered stored intent (hash mismatch) → fail closed
+- OWNER/ADMIN may request delete; MEMBER → 403
+- Cross-organization targets → 404
+
+### Lifecycle
+
+`PENDING` → `AUTHORIZED` → `EXECUTED` (also `EXPIRED` / `CANCELLED` / `FAILED`)
+
+Structured events are recorded for later audit chaining — **not** tamper-evident yet.
+
+### Risk linkage
+
+The latest Phase 3 `RiskAssessment` for the actor may be linked for display. Risk remains **Observe Mode** and does not block action authorization in Phase 4.
 
 ## Risk Engine (Phase 3)
 
@@ -226,6 +271,8 @@ pnpm test
 | `SESSION_TTL_SECONDS` | API | No | Session lifetime |
 | `WEBAUTHN_CHALLENGE_TTL_SECONDS` | API | No | Challenge lifetime |
 | `RISK_MODE` | API | No | `observe` (default) or `enforce` |
+| `ACTION_AUTH_PENDING_TTL_SECONDS` | API | No | PENDING → verify window |
+| `ACTION_AUTH_EXECUTION_TTL_SECONDS` | API | No | AUTHORIZED → execute window |
 | `RATE_LIMIT_*` | API | No | In-memory auth rate limits |
 | `NEXT_PUBLIC_API_URL` | web | **Yes** | Proxy upstream target |
 
@@ -239,32 +286,41 @@ pnpm test
 | GET | `/api/v1/risk/events` | Auth events with risk |
 | POST | `/api/v1/risk/simulate` | Simulation only (not persisted) |
 
-## Manual Passkey + Risk Test
+## Manual Action Authorization Test (Phase 4)
 
 1. `pnpm dev`
-2. Login with an existing passkey (or register first)
-3. Confirm authentication still succeeds
-4. Open `/dashboard` — risk summary should show at least one assessment
-5. Open `/dashboard/authentication` — score, level, recommended decision, Observe Mode
-6. Open assessment detail — triggered signals with human-readable reasons
-7. Logout and login again — known IP/UA context may reduce score vs first observation from that environment
+2. Login with an existing passkey
+3. Open `/dashboard/applications`
+4. Create a disposable application
+5. Click **Delete** — confirm it is **not** deleted immediately
+6. Review exact intent (name, org, intent hash)
+7. **Authorize with passkey** — complete browser WebAuthn
+8. Confirm status becomes **AUTHORIZED** (app still exists)
+9. **Execute authorized action**
+10. Confirm exact app deleted; status **EXECUTED**
+11. Execute again — must fail (replay)
+12. Open `/dashboard/actions` — inspect lifecycle and intent payload
+
+## Manual Passkey + Risk Test (Phase 3)
+
+1. Login → `/dashboard` risk summary
+2. `/dashboard/authentication` → score, level, Observe Mode, signal reasons
 
 ## Current Implementation Status
 
 ### Implemented
 
-- Phase 1 foundation + Phase 2 passkey identity/sessions
-- `@aegisauth/risk-engine` with unit tests
-- Risk assessments persisted on successful passkey login (Observe Mode)
-- Dashboard risk overview + authentication explainability UI
-- Organization-scoped risk APIs
+- Phases 1–3 (passkeys, sessions, observe-mode risk)
+- Phase 4 intent-bound `DELETE_APPLICATION` with passkey confirmation
+- Applications create/list + Actions dashboard
+- Canonical intent hashing + replay/tamper protections
 
 ### Not Yet Implemented
 
 - Enforce mode (blocking) as a supported production setting
-- Email verification / recovery / break-glass
-- Sensitive action authorization / multi-party policies
+- Multi-party / quorum approvals / full policy engine
 - Tamper-evident audit chain
+- Email verification / recovery / break-glass
 - Application end-user auth + SDK
 
 ## Security Philosophy

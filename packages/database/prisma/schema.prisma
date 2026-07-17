@@ -5,12 +5,14 @@
 // Phase 1: Organization, Application
 // Phase 2: PlatformUser identity, passkeys, sessions, challenges, auth events
 // Phase 3: Explainable risk assessments (observe mode by default)
+// Phase 4: Intent-bound action authorization (passkey confirms server-stored intent)
 //
 // PlatformUser ≠ future Application end-users. Keep domains separate.
 // Passkey private keys NEVER reach AegisAuth — only public credential material.
 // Session tokens: store SHA-256 hash only; raw token lives in HttpOnly cookie.
-// Challenges: short-lived, single-use, typed (REGISTRATION | AUTHENTICATION).
+// Challenges: short-lived, single-use, typed (incl. ACTION_AUTHORIZATION).
 // Risk records store score/level/reasons — never raw session tokens or public keys.
+// Action intents are immutable server-side; WebAuthn does not sign arbitrary JSON.
 // =============================================================================
 
 generator client {
@@ -32,6 +34,39 @@ enum OrganizationRole {
 enum WebAuthnChallengeType {
   REGISTRATION
   AUTHENTICATION
+  ACTION_AUTHORIZATION
+}
+
+enum ActionType {
+  DELETE_APPLICATION
+  ROTATE_APPLICATION_SECRET
+  CHANGE_MEMBER_ROLE
+  REMOVE_MEMBER
+  EXPORT_SENSITIVE_DATA
+}
+
+enum ActionTargetType {
+  APPLICATION
+  ORGANIZATION_MEMBER
+  ORGANIZATION
+}
+
+enum ActionAuthorizationStatus {
+  PENDING
+  AUTHORIZED
+  EXECUTED
+  EXPIRED
+  CANCELLED
+  FAILED
+}
+
+enum ActionAuthorizationEventType {
+  ACTION_AUTHORIZATION_CREATED
+  ACTION_AUTHORIZATION_VERIFIED
+  ACTION_AUTHORIZATION_EXECUTED
+  ACTION_AUTHORIZATION_EXPIRED
+  ACTION_AUTHORIZATION_CANCELLED
+  ACTION_AUTHORIZATION_FAILED
 }
 
 enum AuthenticationEventType {
@@ -88,8 +123,9 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  applications Application[]
-  members      OrganizationMember[]
+  applications         Application[]
+  members              OrganizationMember[]
+  actionAuthorizations ActionAuthorization[]
 
   @@map("organizations")
 }
@@ -124,6 +160,8 @@ model PlatformUser {
   challenges           WebAuthnChallenge[]
   authenticationEvents AuthenticationEvent[]
   riskAssessments      RiskAssessment[]
+  actionAuthorizations ActionAuthorization[]
+  actionAuthorizationEvents ActionAuthorizationEvent[]
 
   @@map("platform_users")
 }
@@ -245,9 +283,10 @@ model RiskAssessment {
   userAgent             String?      @map("user_agent") @db.VarChar(512)
   createdAt             DateTime     @default(now()) @map("created_at")
 
-  platformUser        PlatformUser         @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
-  authenticationEvent AuthenticationEvent? @relation(fields: [authenticationEventId], references: [id], onDelete: SetNull)
-  signals             RiskSignal[]
+  platformUser         PlatformUser          @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  authenticationEvent  AuthenticationEvent?  @relation(fields: [authenticationEventId], references: [id], onDelete: SetNull)
+  signals              RiskSignal[]
+  actionAuthorizations ActionAuthorization[]
 
   @@index([platformUserId])
   @@index([createdAt])
@@ -272,4 +311,69 @@ model RiskSignal {
   @@index([riskAssessmentId])
   @@index([type])
   @@map("risk_signals")
+}
+
+/// Server-stored immutable action intent + lifecycle for passkey confirmation.
+/// Passkey verification authorizes this stored intent via a single-use challenge —
+/// it does NOT mean the authenticator signed arbitrary action JSON.
+model ActionAuthorization {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  platformUserId      String                    @map("platform_user_id") @db.Uuid
+  organizationId      String                    @map("organization_id") @db.Uuid
+  actionType          ActionType                @map("action_type")
+  targetType          ActionTargetType          @map("target_type")
+  targetId            String                    @map("target_id") @db.Uuid
+  /// Canonical intent object (versioned). Immutable after creation.
+  intentPayload       Json                      @map("intent_payload")
+  /// SHA-256 of canonical serialized intent.
+  intentHash          String                    @map("intent_hash") @db.VarChar(64)
+  /// Human-readable display fields (names) — not used for security decisions.
+  displaySummary      Json                      @map("display_summary")
+  status              ActionAuthorizationStatus @default(PENDING)
+  riskAssessmentId    String?                   @map("risk_assessment_id") @db.Uuid
+  /// When PENDING authorization request expires (before passkey verify).
+  pendingExpiresAt    DateTime                  @map("pending_expires_at")
+  /// When AUTHORIZED grant must be executed by (set at authorization time).
+  executionExpiresAt  DateTime?                 @map("execution_expires_at")
+  authorizedAt        DateTime?                 @map("authorized_at")
+  executedAt          DateTime?                 @map("executed_at")
+  cancelledAt         DateTime?                 @map("cancelled_at")
+  failedAt            DateTime?                 @map("failed_at")
+  failureReason       String?                   @map("failure_reason")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  platformUser   PlatformUser              @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  organization   Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  riskAssessment RiskAssessment?           @relation(fields: [riskAssessmentId], references: [id], onDelete: SetNull)
+  events         ActionAuthorizationEvent[]
+
+  @@index([platformUserId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([intentHash])
+  @@map("action_authorizations")
+}
+
+/// Structured lifecycle events — not a tamper-evident chain (later phase).
+model ActionAuthorizationEvent {
+  id                    String                       @id @default(uuid()) @db.Uuid
+  actionAuthorizationId String                       @map("action_authorization_id") @db.Uuid
+  platformUserId        String?                      @map("platform_user_id") @db.Uuid
+  type                  ActionAuthorizationEventType
+  success               Boolean
+  ipAddress             String?                      @map("ip_address")
+  userAgent             String?                      @map("user_agent")
+  metadata              Json?
+  createdAt             DateTime                     @default(now()) @map("created_at")
+
+  actionAuthorization ActionAuthorization @relation(fields: [actionAuthorizationId], references: [id], onDelete: Cascade)
+  platformUser        PlatformUser?       @relation(fields: [platformUserId], references: [id], onDelete: SetNull)
+
+  @@index([actionAuthorizationId])
+  @@index([platformUserId])
+  @@index([createdAt])
+  @@index([type])
+  @@map("action_authorization_events")
 }

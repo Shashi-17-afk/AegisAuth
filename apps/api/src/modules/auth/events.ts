@@ -14,8 +14,8 @@ type EventInput = {
 };
 
 /** Persist a non-sensitive authentication event. Never log tokens or private keys. */
-export async function recordAuthEvent(input: EventInput): Promise<void> {
-  await prisma.authenticationEvent.create({
+export async function recordAuthEvent(input: EventInput) {
+  return prisma.authenticationEvent.create({
     data: {
       type: input.type,
       success: input.success,

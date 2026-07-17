@@ -4,11 +4,13 @@
 // ID strategy: UUID (@default(uuid())).
 // Phase 1: Organization, Application
 // Phase 2: PlatformUser identity, passkeys, sessions, challenges, auth events
+// Phase 3: Explainable risk assessments (observe mode by default)
 //
 // PlatformUser ≠ future Application end-users. Keep domains separate.
 // Passkey private keys NEVER reach AegisAuth — only public credential material.
 // Session tokens: store SHA-256 hash only; raw token lives in HttpOnly cookie.
 // Challenges: short-lived, single-use, typed (REGISTRATION | AUTHENTICATION).
+// Risk records store score/level/reasons — never raw session tokens or public keys.
 // =============================================================================
 
 generator client {
@@ -39,6 +41,44 @@ enum AuthenticationEventType {
   PASSKEY_AUTHENTICATION_FAILURE
   SESSION_CREATED
   SESSION_REVOKED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskDecision {
+  ALLOW
+  STEP_UP
+  DENY
+}
+
+enum RiskMode {
+  OBSERVE
+  ENFORCE
+}
+
+enum RiskSignalType {
+  UNKNOWN_USER_AGENT
+  UNKNOWN_IP
+  RECENT_FAILURES
+  RAPID_ATTEMPTS
+  NEW_CREDENTIAL
+  NEW_ACCOUNT
+  HIGH_SESSION_COUNT
+  LONG_DORMANCY
+  COMPOUND_NEW_CONTEXT
+  COMPOUND_NEW_CONTEXT_WITH_FAILURES
+}
+
+enum RiskSignalSeverity {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
 }
 
 model Organization {
@@ -78,11 +118,12 @@ model PlatformUser {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  memberships       OrganizationMember[]
-  passkeys          PasskeyCredential[]
-  sessions          Session[]
-  challenges        WebAuthnChallenge[]
+  memberships          OrganizationMember[]
+  passkeys             PasskeyCredential[]
+  sessions             Session[]
+  challenges           WebAuthnChallenge[]
   authenticationEvents AuthenticationEvent[]
+  riskAssessments      RiskAssessment[]
 
   @@map("platform_users")
 }
@@ -177,10 +218,58 @@ model AuthenticationEvent {
   metadata       Json?
   createdAt      DateTime                @default(now()) @map("created_at")
 
-  platformUser PlatformUser? @relation(fields: [platformUserId], references: [id], onDelete: SetNull)
+  platformUser    PlatformUser?    @relation(fields: [platformUserId], references: [id], onDelete: SetNull)
+  riskAssessments RiskAssessment[]
 
   @@index([platformUserId])
   @@index([createdAt])
   @@index([type])
   @@map("authentication_events")
+}
+
+/// Persist every evaluated signal (triggered and not) for explainability.
+/// Avoids opaque score-only records; volume is bounded (~8–10 rows / assessment).
+model RiskAssessment {
+  id                    String       @id @default(uuid()) @db.Uuid
+  platformUserId        String       @map("platform_user_id") @db.Uuid
+  authenticationEventId String?      @map("authentication_event_id") @db.Uuid
+  score                 Int
+  level                 RiskLevel
+  recommendedDecision   RiskDecision @map("recommended_decision")
+  /// What was actually applied. Phase 3 OBSERVE → always ALLOW for valid WebAuthn.
+  enforcedDecision      RiskDecision @map("enforced_decision")
+  mode                  RiskMode
+  /// Normalized IP used for known-IP comparison (may be null locally).
+  ipAddress             String?      @map("ip_address")
+  /// Truncated User-Agent (weak contextual signal only).
+  userAgent             String?      @map("user_agent") @db.VarChar(512)
+  createdAt             DateTime     @default(now()) @map("created_at")
+
+  platformUser        PlatformUser         @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  authenticationEvent AuthenticationEvent? @relation(fields: [authenticationEventId], references: [id], onDelete: SetNull)
+  signals             RiskSignal[]
+
+  @@index([platformUserId])
+  @@index([createdAt])
+  @@index([level])
+  @@index([authenticationEventId])
+  @@map("risk_assessments")
+}
+
+model RiskSignal {
+  id               String             @id @default(uuid()) @db.Uuid
+  riskAssessmentId String             @map("risk_assessment_id") @db.Uuid
+  type             RiskSignalType
+  triggered        Boolean
+  contribution     Int
+  severity         RiskSignalSeverity
+  reason           String
+  metadata         Json?
+  createdAt        DateTime           @default(now()) @map("created_at")
+
+  riskAssessment RiskAssessment @relation(fields: [riskAssessmentId], references: [id], onDelete: Cascade)
+
+  @@index([riskAssessmentId])
+  @@index([type])
+  @@map("risk_signals")
 }

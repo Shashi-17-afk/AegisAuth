@@ -8,9 +8,7 @@ import { beginAuthentication, completeAuthentication } from "../modules/auth/log
 import { beginRegistration, completeRegistration } from "../modules/auth/register.js";
 import {
   clearSessionCookie,
-  createSession,
   revokeSession,
-  SESSION_COOKIE_NAME,
 } from "../modules/auth/session.js";
 import { ensureAuth, requireAuth } from "../plugins/auth.js";
 
@@ -212,33 +210,6 @@ export function authRoutes(env: Env): FastifyPluginAsync {
 
     // Intentionally no passkey DELETE in Phase 2 — recovery is not implemented.
     // Deleting the final passkey would lock the account.
-
-    /**
-     * Development/test-only: establish a real HttpOnly session without WebAuthn.
-     * Used to prove Set-Cookie forwarding through the Next.js proxy.
-     * Disabled in production.
-     */
-    if (env.NODE_ENV !== "production") {
-      app.post("/api/v1/auth/dev/session-probe", async (request, reply) => {
-        assertTrustedOrigin(request, env.WEB_ORIGIN);
-        const user = await prisma.platformUser.findFirst({
-          orderBy: { createdAt: "desc" },
-        });
-        if (!user) {
-          throw new AppError(404, "NO_USER", "No platform user available for probe");
-        }
-        await createSession({
-          env,
-          platformUserId: user.id,
-          reply,
-          ipAddress: clientIp(request),
-          userAgent: clientUserAgent(request),
-        });
-        return reply.send({ ok: true, platformUserId: user.id });
-      });
-    }
-
-    void SESSION_COOKIE_NAME;
   };
 }
 

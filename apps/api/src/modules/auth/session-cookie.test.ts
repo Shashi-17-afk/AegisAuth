@@ -1,21 +1,25 @@
+import Fastify from "fastify";
+import cookie from "@fastify/cookie";
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma } from "@aegisauth/database";
 import { loadEnv } from "../../config/env.js";
 import { buildApp } from "../../app.js";
 import { hashSessionToken } from "../../lib/crypto.js";
-import { SESSION_COOKIE_NAME } from "./session.js";
+import { createSession, SESSION_COOKIE_NAME } from "./session.js";
 
 /**
- * HTTP-level session cookie lifecycle (no WebAuthn).
- * Proves: Set-Cookie emitted → /me accepts cookie → logout revokes → /me rejects.
+ * HTTP-level session cookie lifecycle (no WebAuthn, no public debug endpoint).
+ * Establishes a session via the internal createSession helper on a disposable
+ * Fastify instance, then proves the real API accepts / clears the cookie.
  */
 describe("session cookie lifecycle", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
+  let env: ReturnType<typeof loadEnv>;
   let platformUserId: string | null = null;
   const createdSessionIds: string[] = [];
 
   beforeAll(async () => {
-    const env = loadEnv({
+    env = loadEnv({
       ...process.env,
       NODE_ENV: "test",
       API_PORT: "3001",
@@ -49,15 +53,30 @@ describe("session cookie lifecycle", () => {
       return;
     }
 
-    const probe = await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/dev/session-probe",
-      headers: { origin: "http://localhost:3000" },
+    // Call createSession through a disposable app (not an exposed API route).
+    const cookieApp = Fastify({ logger: false });
+    await cookieApp.register(cookie);
+    cookieApp.post("/establish", async (_request, reply) => {
+      await createSession({
+        env,
+        platformUserId: platformUserId!,
+        reply,
+        ipAddress: "127.0.0.1",
+        userAgent: "session-cookie-test",
+      });
+      return reply.send({ ok: true });
     });
+    await cookieApp.ready();
 
-    expect(probe.statusCode).toBe(200);
+    const established = await cookieApp.inject({
+      method: "POST",
+      url: "/establish",
+    });
+    await cookieApp.close();
 
-    const setCookie = probe.headers["set-cookie"];
+    expect(established.statusCode).toBe(200);
+
+    const setCookie = established.headers["set-cookie"];
     expect(setCookie).toBeTruthy();
 
     const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;

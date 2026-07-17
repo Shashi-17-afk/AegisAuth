@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@aegisauth/database": "workspace:*",
+    "@aegisauth/risk-engine": "workspace:*",
     "@aegisauth/shared": "workspace:*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.1",

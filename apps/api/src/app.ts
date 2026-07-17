@@ -10,12 +10,16 @@ import { registerSessionAuth } from "./plugins/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { apiRoutes } from "./routes/api.js";
 import { authRoutes } from "./routes/auth.js";
+import { riskRoutes } from "./routes/risk.js";
 
 export async function buildApp(env: Env) {
   const app = Fastify({
     logger: {
       level: env.NODE_ENV === "production" ? "info" : "debug",
     },
+    // Production: set to known reverse-proxy hop count / addresses only.
+    // Do not enable unrestricted trustProxy — clientIp uses request.ip.
+    trustProxy: false,
   });
 
   // Restrict CORS to the trusted web origin — never allow "*" with credentials.
@@ -47,6 +51,7 @@ export async function buildApp(env: Env) {
   await app.register(healthRoutes);
   await app.register(apiRoutes);
   await app.register(authRoutes(env));
+  await app.register(riskRoutes(env));
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {

@@ -34,6 +34,13 @@ const envSchema = z.object({
   /** WebAuthn challenge lifetime in seconds (default 5 minutes). */
   WEBAUTHN_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
+  /**
+   * Risk engine mode.
+   * observe (default): calculate + store + display; never block valid WebAuthn.
+   * enforce: scaffolded only — Phase 3 must remain observe unless explicitly enabled later.
+   */
+  RISK_MODE: z.enum(["observe", "enforce"]).default("observe"),
+
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_TIME_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });

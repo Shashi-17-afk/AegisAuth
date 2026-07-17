@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { RiskOverviewPanel } from "@/components/dashboard/risk-overview-panel";
 import { useAuth } from "@/components/auth/auth-provider";
 
 export default function DashboardOverviewPage() {
@@ -12,7 +13,7 @@ export default function DashboardOverviewPage() {
       title="Overview"
       description="Your AegisAuth platform account."
     >
-      <div className="max-w-2xl space-y-8">
+      <div className="mx-auto max-w-4xl space-y-8">
         <section className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
           <h2 className="font-display text-xl font-semibold tracking-tight">
             Signed in
@@ -42,10 +43,13 @@ export default function DashboardOverviewPage() {
             ) : null}
           </dl>
           <p className="mt-6 text-xs leading-relaxed text-[var(--muted)]">
-            Email identifies your account. Phase 2 does not prove email ownership —
-            your passkey proves authenticator possession.
+            Email identifies your account. Passkeys prove authenticator
+            possession. Risk assessments observe login context without blocking
+            valid WebAuthn in Phase 3.
           </p>
         </section>
+
+        <RiskOverviewPanel />
       </div>
     </DashboardShell>
   );

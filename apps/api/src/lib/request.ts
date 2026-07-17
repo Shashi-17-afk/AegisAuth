@@ -1,17 +1,24 @@
 import type { FastifyRequest } from "fastify";
 import { AppError } from "./errors.js";
+import { normalizeIpAddress, normalizeUserAgent } from "./net.js";
 
+/**
+ * Client IP for sessions / risk.
+ *
+ * Uses Fastify's `request.ip`, which respects `trustProxy` when configured.
+ * Does NOT read X-Forwarded-For directly — that would allow client spoofing
+ * unless the proxy chain is trusted via Fastify trustProxy.
+ *
+ * Local: typically 127.0.0.1.
+ * Production: set trustProxy to known reverse-proxy hop count / addresses.
+ */
 export function clientIp(request: FastifyRequest): string | null {
-  const forwarded = request.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]?.trim() ?? null;
-  }
-  return request.ip ?? null;
+  return normalizeIpAddress(request.ip);
 }
 
 export function clientUserAgent(request: FastifyRequest): string | null {
   const ua = request.headers["user-agent"];
-  return typeof ua === "string" ? ua.slice(0, 512) : null;
+  return typeof ua === "string" ? normalizeUserAgent(ua) : null;
 }
 
 /**

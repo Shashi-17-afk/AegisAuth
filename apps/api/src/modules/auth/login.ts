@@ -8,6 +8,9 @@ import { prisma } from "@aegisauth/database";
 import type { FastifyReply } from "fastify";
 import type { Env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
+import { normalizeIpAddress, normalizeUserAgent } from "../../lib/net.js";
+import { assessAndPersistRisk } from "../risk/assess.js";
+import { buildRiskContext } from "../risk/context.js";
 import { consumeChallenge, storeChallenge } from "./challenges.js";
 import { recordAuthEvent } from "./events.js";
 import { createSession } from "./session.js";
@@ -44,6 +47,8 @@ export async function completeAuthentication(input: {
   userAgent: string | null;
 }) {
   const credentialId = input.response.id;
+  const ipAddress = normalizeIpAddress(input.ipAddress);
+  const userAgent = normalizeUserAgent(input.userAgent);
 
   const stored = await prisma.passkeyCredential.findUnique({
     where: { credentialId },
@@ -54,8 +59,8 @@ export async function completeAuthentication(input: {
     await recordAuthEvent({
       type: "PASSKEY_AUTHENTICATION_FAILURE",
       success: false,
-      ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
+      ipAddress,
+      userAgent,
       metadata: { reason: "UNKNOWN_CREDENTIAL" },
     });
     throw new AppError(401, "AUTH_FAILED", "Authentication failed");
@@ -87,10 +92,11 @@ export async function completeAuthentication(input: {
       type: "PASSKEY_AUTHENTICATION_FAILURE",
       success: false,
       platformUserId: stored.platformUserId,
-      ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
+      ipAddress,
+      userAgent,
       metadata: {
         reason: error instanceof AppError ? error.code : "VERIFICATION_FAILED",
+        credentialId: stored.credentialId,
       },
     });
     if (error instanceof AppError) {
@@ -104,9 +110,9 @@ export async function completeAuthentication(input: {
       type: "PASSKEY_AUTHENTICATION_FAILURE",
       success: false,
       platformUserId: stored.platformUserId,
-      ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
-      metadata: { reason: "NOT_VERIFIED" },
+      ipAddress,
+      userAgent,
+      metadata: { reason: "NOT_VERIFIED", credentialId: stored.credentialId },
     });
     throw new AppError(401, "AUTH_FAILED", "Authentication failed");
   }
@@ -117,30 +123,73 @@ export async function completeAuthentication(input: {
    * SimpleWebAuthn's verified newCounter rather than inventing clone-detection.
    */
   const newCounter = verification.authenticationInfo.newCounter;
-  await prisma.passkeyCredential.update({
-    where: { id: stored.id },
-    data: {
-      counter: BigInt(newCounter),
-      lastUsedAt: new Date(),
-      backedUp: verification.authenticationInfo.credentialBackedUp,
-      deviceType: verification.authenticationInfo.credentialDeviceType,
-    },
-  });
 
-  await recordAuthEvent({
-    type: "PASSKEY_AUTHENTICATION_SUCCESS",
-    success: true,
-    platformUserId: stored.platformUserId,
-    ipAddress: input.ipAddress,
-    userAgent: input.userAgent,
-  });
+  // Risk context BEFORE mutating lastUsedAt / recording success (observe prior history).
+  let riskBlocked = false;
+  let riskAssessmentId: string | null = null;
+
+  try {
+    const riskInput = await buildRiskContext({
+      platformUser: stored.platformUser,
+      credential: stored,
+      ipAddress,
+      userAgent,
+    });
+
+    await prisma.passkeyCredential.update({
+      where: { id: stored.id },
+      data: {
+        counter: BigInt(newCounter),
+        lastUsedAt: new Date(),
+        backedUp: verification.authenticationInfo.credentialBackedUp,
+        deviceType: verification.authenticationInfo.credentialDeviceType,
+      },
+    });
+
+    const authEvent = await recordAuthEvent({
+      type: "PASSKEY_AUTHENTICATION_SUCCESS",
+      success: true,
+      platformUserId: stored.platformUserId,
+      ipAddress,
+      userAgent,
+      metadata: { credentialId: stored.credentialId },
+    });
+
+    try {
+      const { record, blocked } = await assessAndPersistRisk({
+        env: input.env,
+        platformUserId: stored.platformUserId,
+        authenticationEventId: authEvent.id,
+        riskInput,
+        ipAddress,
+        userAgent,
+      });
+      riskAssessmentId = record.id;
+      riskBlocked = blocked;
+    } catch (riskError) {
+      // Fail-safe: risk engine must not corrupt authentication state.
+      console.error("[risk] assessment failed; continuing auth", riskError);
+    }
+  } catch (error) {
+    // If credential update / event recording fails, surface as auth failure.
+    throw error;
+  }
+
+  // Phase 3 OBSERVE: riskBlocked is always false. ENFORCE scaffold may deny.
+  if (riskBlocked) {
+    throw new AppError(
+      403,
+      "RISK_DENIED",
+      "Authentication denied by risk policy",
+    );
+  }
 
   await createSession({
     env: input.env,
     platformUserId: stored.platformUserId,
     reply: input.reply,
-    ipAddress: input.ipAddress,
-    userAgent: input.userAgent,
+    ipAddress,
+    userAgent,
   });
 
   return {
@@ -149,5 +198,6 @@ export async function completeAuthentication(input: {
       email: stored.platformUser.email,
       displayName: stored.platformUser.displayName,
     },
+    riskAssessmentId,
   };
 }

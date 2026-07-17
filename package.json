@@ -1,0 +1,24 @@
+{
+  "name": "aegisauth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adaptive Passwordless Authentication & Verifiable Authorization Platform",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @aegisauth/database generate",
+    "db:migrate": "pnpm --filter @aegisauth/database migrate",
+    "db:migrate:deploy": "pnpm --filter @aegisauth/database migrate:deploy",
+    "db:studio": "pnpm --filter @aegisauth/database studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

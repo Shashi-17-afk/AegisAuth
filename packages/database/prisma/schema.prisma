@@ -1,0 +1,48 @@
+// =============================================================================
+// AegisAuth — Phase 1 foundational schema
+// =============================================================================
+// ID strategy: UUID (postgresql gen_random_uuid via Prisma @default(uuid())).
+// UUIDs are opaque, collision-resistant, and interoperable across services/SDKs.
+//
+// Cascade: deleting an Organization removes its Applications. Applications are
+// org-scoped configuration entities with no independent security meaning yet.
+// Future security-sensitive models (credentials, sessions, audit) must NOT
+// inherit cascade blindly — design deletion policy per model.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  applications Application[]
+
+  @@map("organizations")
+}
+
+model Application {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  slug           String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("applications")
+}
